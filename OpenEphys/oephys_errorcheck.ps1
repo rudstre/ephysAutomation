@@ -1,28 +1,11 @@
 # Import common functions
-. "$PSScriptRoot\oephys_common.ps1"
+. "$PSScriptRoot\..\oephys_common.ps1"
+. "$PSScriptRoot\..\tasks_common.ps1"  
 
-# Define the path for local and remote storage
-$localDriveLetter = "C:"  # Adjust this if the local storage is on a different drive
-$remoteDrivePath = "\\RemoteStoragePath"  # Replace with the actual network path for Buffer
-$shutdownScriptPath = "$PSScriptRoot\oephys_shutdown.ps1"  # Path to the shutdown script
-
-# Pushover API credentials from config
-$userKey = $config.UserInfo.UserKey
-$apiToken = "your_api_token_here"
-$devices = $config.UserInfo.Devices -join ','
-
-# Function to send Pushover notification
-function Send-Notification {
-    param (
-        [string]$message
-    )
-    Invoke-RestMethod -Uri "https://api.pushover.net/1/messages.json" -Method Post -Body @{
-        token = $apiToken
-        user = $userKey
-        device = $devices
-        message = $message
-    }
-}
+# Load configuration settings
+$baseSavePath = $oephysConfig.Config.BaseSavePath
+$projectFolder = $oephysConfig.Config.ProjectFolder
+$destinationBasePath = Join-Path -Path $baseSavePath -ChildPath $projectFolder
 
 # Check if Open Ephys is running
 function Check-OpenEphysRunning {
@@ -38,28 +21,33 @@ function Check-OpenEphysRunning {
 function Check-RecordingStatus {
     $currentMode = Get-CurrentMode
     if ($currentMode -ne "RECORD") {
-        Write-Host "Recording has stopped. Attempting to restart..."
-        Restart-Recording
+        Start-Sleep -Seconds 2  # Wait a bit and recheck
+        $currentMode = Get-CurrentMode
+        if ($currentMode -ne "RECORD") {
+            Send-Notification "Recording has stopped. Attempting to restart..."
+            Restart-Recording
+            if (Get-CurrentMode -eq "RECORD") {
+                Send-Notification "Recording successfully restarted."
+            } else {
+                Send-Notification "Failed to restart recording after it stopped."
+            }
+            return $false
+        }
+    }
+    return $true
+}
+
+# Check if the remote storage drive (Buffer) is connected
+function Check-RemoteStorageConnection {
+    $drive = Split-Path -Path $destinationBasePath -Qualifier
+    if (-not (Test-Path $drive)) {
+        Send-Notification "Buffer storage is not connected."
         return $false
     }
     return $true
 }
 
-# Restart recording if stopped
-function Restart-Recording {
-    Send-Command "ACQUIRE"
-    Start-Sleep -Seconds 2
-    Send-Command "RECORD"
-    Start-Sleep -Seconds 2
-
-    if (Get-CurrentMode -eq "RECORD") {
-        Send-Notification "Recording had stopped but has been successfully restarted."
-    } else {
-        Send-Notification "Failed to restart recording after it stopped."
-    }
-}
-
-# Common function to check storage space and send alerts based on usage percentage
+# Check storage usage and send alerts based on usage percentage
 function Check-StorageUsage {
     param (
         [string]$drivePath,
@@ -85,29 +73,11 @@ function Check-StorageUsage {
     return $true
 }
 
-# Stop recording and run the shutdown script
-function Stop-RecordingAndShutdown {
-    Send-Command "IDLE"
-    Write-Host "Recording stopped due to critical storage usage."
-
-    & $shutdownScriptPath
-    Write-Host "Shutdown script executed."
-}
-
-# Check if the remote storage drive is connected
-function Check-RemoteStorageConnection {
-    if (-not (Test-Path $remoteDrivePath)) {
-        Send-Notification "Buffer storage is not connected."
-        return $false
-    }
-    return $true
-}
-
-# Check if the other scheduled scripts are running
+# Check if scheduled tasks are running
 function Check-ScheduledTasks {
     $scheduledTasks = @("Oephys New Chunk Task", "Oephys Move Data Task", "Oephys Check Errors Task")
     foreach ($task in $scheduledTasks) {
-        if (-not (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)) {
+        if (-not Check-ScheduledTask -taskName $task) {
             Send-Notification "Scheduled task '$task' is not running."
             return $false
         }
@@ -115,7 +85,7 @@ function Check-ScheduledTasks {
     return $true
 }
 
-# Check if too many recordings are building up
+# Check if too many recordings are building up (move data script is keeping up)
 function Check-RecordingBuildUp {
     $recordingInfo = Get-RecordingInfo
     $recordNodes = $recordingInfo.record_nodes
@@ -131,7 +101,7 @@ function Check-RecordingBuildUp {
     return $true
 }
 
-# Main check functions
+# Main error checks
 if (Check-OpenEphysRunning) {
     if (-not Check-RecordingStatus) {
         Write-Host "Attempted to restart recording."
@@ -150,11 +120,11 @@ if (-not Check-RecordingBuildUp) {
     Write-Host "Recording build-up check failed."
 }
 
-if (-not Check-StorageUsage -drivePath $localDriveLetter -driveName "Local") {
+if (-not Check-StorageUsage -drivePath $env:SystemDrive -driveName "Local") {
     Write-Host "Local storage check failed."
 }
 
-if (-not Check-StorageUsage -drivePath $remoteDrivePath -driveName "Buffer") {
+if (-not Check-StorageUsage -drivePath $destinationBasePath -driveName "Buffer") {
     Write-Host "Buffer storage check failed."
 }
 

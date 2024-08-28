@@ -1,19 +1,48 @@
-# Load configuration from JSON
-$configPath = "$PSScriptRoot\toLocal\oephys_config.json"
-$config = Get-Content -Path $configPath | ConvertFrom-Json
+# Import common functions
+. "$PSScriptRoot\..\oephys_common.ps1"
+. "$PSScriptRoot\..\tasks_common.ps1"
 
-# Define constants from the config file
-$hostAddress = $config.Config.Host
-$port = $config.Config.Port
+# Define paths
 $localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
-$sourceDirectory = "$PSScriptRoot\toLocal"  # Source directory to copy files from
+$scriptsPath = "$PSScriptRoot\OpenEphys"  # Source directory to copy files from
+$commonPath = "$PSScriptRoot\..\common"  # Source path for notifications directory
+$configPath = "$PSScriptRoot\..\configs"  # Source path for notifications directory
+
+# Check for the base save path in the Open Ephys config
+$baseSavePath = $oephysConfig.Config.BaseSavePath
+
+if (-not $baseSavePath) {
+    Write-Host "No base save path found in the configuration."
+    Write-Host "Please specify a general base path on the Buffer storage where all Open Ephys data should be moved after recording."
+    Write-Host "Note: This path should NOT be project-specific. You will choose a project-specific folder shortly."
+    $baseSavePath = Read-Host
+    $oephysConfig.Config.BaseSavePath = $baseSavePath
+    $oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
+} else {
+    Write-Host "Current base save path for moving data: $baseSavePath"
+    Write-Host "This path should be a general location for storing all Open Ephys data."
+    Write-Host "Do you want to keep this base save path? (y/n)"
+    $response = Read-Host
+    if ($response -ne "y") {
+        Write-Host "Please specify a new general base save path on the Buffer storage:"
+        $baseSavePath = Read-Host
+        $oephysConfig.Config.BaseSavePath = $baseSavePath
+        $oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
+    }
+}
+
+# Ask for the project-specific folder name within the base save path
+Write-Host "Enter the project-specific folder name to organize the data within the base save path:"
+$projectFolder = Read-Host
+$oephysConfig.Config.ProjectFolder = $projectFolder
+$oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
 
 # Ensure local directory exists
 if (-not (Test-Path -Path $localScriptPath)) {
     New-Item -ItemType Directory -Path $localScriptPath
 }
 
-# Run oephys_startup.ps1 to set up recording environment
+# Run oephys_startup.ps1 to set up the recording environment
 Write-Host "Running startup script to initialize Open Ephys recording setup..."
 & "$PSScriptRoot\oephys_startup.ps1"
 
@@ -22,13 +51,16 @@ if ($LASTEXITCODE -ne 0) {
     exit
 }
 
-# Copy all files from the toLocal folder to the local folder
-Copy-Item -Path "$sourceDirectory\*" -Destination $localScriptPath -Recurse -Force
+# Copy files locally
+Copy-Item -Path "$scriptsPath\*" -Destination $localScriptPath -Recurse -Force
+Copy-Item -Path "$commonPath" -Destination $localScriptPath -Recurse -Force
+Copy-Item -Path "$configPath" -Destination $localScriptPath -Recurse -Force
 
-Write-Host "All necessary files copied to local storage for resilience against remote storage disconnection."
 
-# Initialize user info
-$userInfo = $config.UserInfo
+Write-Host "All necessary files and notifications directory copied to local storage for resilience against remote storage disconnection."
+
+# Initialize user info from notifications configuration
+$userInfo = $notificationsConfig.UserInfo
 
 # Check if user info is already present
 if ($userInfo) {
@@ -49,14 +81,10 @@ if ($userInfo) {
 
     # Fetch user's devices from Pushover API
     Write-Host "Retrieving your devices from Pushover..."
-    $response = Invoke-RestMethod -Uri "https://api.pushover.net/1/devices.json" -Method Post -Body @{
-        token = "your_api_token_here"
-        user = $userKey
-    }
+    $devices = Get-UserDevices
 
-    if ($response.devices) {
-        $userDevices = $response.devices | ForEach-Object { $_.name }
-        Write-Host "Your devices: $($userDevices -join ', ')"
+    if ($devices.Count -gt 0) {
+        Write-Host "Your devices: $($devices -join ', ')"
 
         # Prompt user to select devices for notifications or 'all' for all devices
         Write-Host "Enter the devices you want to receive notifications on (comma-separated), or type 'all' for all devices:"
@@ -68,56 +96,21 @@ if ($userInfo) {
             $selectedDevicesArray = $selectedDevices -split '\s*,\s*'
         }
 
-        # Update user info in JSON
-        $config.UserInfo = @{
+        # Update user info in notifications JSON
+        $notificationsConfig.UserInfo = @{
             FirstName = $firstName
             LastName  = $lastName
             UserKey   = $userKey
             Devices   = $selectedDevicesArray
         }
 
-        # Save updated config to file
-        $config | ConvertTo-Json | Set-Content -Path $configPath
+        # Save updated notifications config to file
+        $notificationsConfig | ConvertTo-Json | Set-Content -Path $notificationsConfigPath
         Write-Host "User information saved."
     } else {
         Write-Host "Failed to retrieve devices. Please check your Pushover User Key."
         exit
     }
-}
-
-# Function to create a scheduled task
-function Create-ScheduledTask {
-    param (
-        [string]$taskName,
-        [string]$scriptPath,
-        [string]$interval
-    )
-
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-File `"$scriptPath`""
-    $trigger = New-ScheduledTaskTrigger -RepetitionInterval $interval -RepeatIndefinitely -Once -At (Get-Date).AddSeconds(30)
-    Register-ScheduledTask -Action $action -Trigger $trigger -TaskName $taskName -Description "Automated task for $taskName"
-}
-
-# Prompt user to enter intervals
-function Get-IntervalInput {
-    param (
-        [string]$taskDescription
-    )
-    
-    do {
-        Write-Host "Enter the interval for $taskDescription (e.g., 60s for 60 seconds, 2m for 2 minutes):"
-        $input = Read-Host
-        
-        if ($input -match '^\d+[sm]$') {
-            if ($input -like '*s') {
-                return "PT$($input -replace 's','')S"
-            } elseif ($input -like '*m') {
-                return "PT$($input -replace 'm','')M"
-            }
-        } else {
-            Write-Host "Invalid input. Please enter a valid interval."
-        }
-    } while ($true)
 }
 
 # Get intervals from user
