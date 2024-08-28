@@ -35,8 +35,6 @@ function Get-RecordingInfo {
 
 # Restart recording if stopped
 function Restart-Recording {
-    Send-Command "ACQUIRE"
-    Start-Sleep -Seconds 2
     Send-Command "RECORD"
     Start-Sleep -Seconds 2
 
@@ -47,22 +45,9 @@ function Restart-Recording {
     }
 }
 
-# Check if Open Ephys is still recording
-function Check-RecordingStatus {
-    $currentMode = Get-CurrentMode
-    if ($currentMode -ne "RECORD") {
-        Write-Host "Recording has stopped. Attempting to restart..."
-        Restart-Recording
-        return $false
-    }
-    return $true
-}
-
 # Stop recording and run the shutdown script
 function Stop-RecordingAndShutdown {
     Send-Command "IDLE"
-    Write-Host "Recording stopped due to critical storage usage."
-
     & "$PSScriptRoot\oephys_shutdown.ps1"
     Write-Host "Shutdown script executed."
 }
@@ -73,6 +58,20 @@ function Check-OpenEphysRunning {
     if (-not $process) {
         Send-Notification "Open Ephys has crashed or is not running."
         return $false
+    }
+    return $true
+}
+
+# Check if Open Ephys is still recording
+function Check-RecordingStatus {
+    $currentMode = Get-CurrentMode
+    if ($currentMode -ne "RECORD") {
+        Start-Sleep -Seconds 2  # Wait a bit and recheck
+        $currentMode = Get-CurrentMode
+        if ($currentMode -ne "RECORD") {
+            Restart-Recording
+            return $false
+        }
     }
     return $true
 }

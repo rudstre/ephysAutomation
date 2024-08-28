@@ -17,26 +17,6 @@ function Check-OpenEphysRunning {
     return $true
 }
 
-# Check if Open Ephys is still recording
-function Check-RecordingStatus {
-    $currentMode = Get-CurrentMode
-    if ($currentMode -ne "RECORD") {
-        Start-Sleep -Seconds 2  # Wait a bit and recheck
-        $currentMode = Get-CurrentMode
-        if ($currentMode -ne "RECORD") {
-            Send-Notification "Recording has stopped. Attempting to restart..."
-            Restart-Recording
-            if (Get-CurrentMode -eq "RECORD") {
-                Send-Notification "Recording successfully restarted."
-            } else {
-                Send-Notification "Failed to restart recording after it stopped."
-            }
-            return $false
-        }
-    }
-    return $true
-}
-
 # Check if the remote storage drive (Buffer) is connected
 function Check-RemoteStorageConnection {
     $drive = Split-Path -Path $destinationBasePath -Qualifier
