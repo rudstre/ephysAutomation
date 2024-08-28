@@ -1,5 +1,5 @@
 # Load configuration from Open Ephys JSON
-. "$PSScriptRoot\..\notifications_common.ps1"
+. "$PSScriptRoot\notifications_common.ps1"
 $localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
 
 $oephysConfigPath = "$PSScriptRoot\oephys_config.json"
