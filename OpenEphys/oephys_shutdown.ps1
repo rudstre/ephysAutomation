@@ -1,6 +1,6 @@
 # Import common functions
-. "$PSScriptRoot\..\common\oephys_common.ps1"
-. "$PSScriptRoot\..\common\tasks_common.ps1"
+. "$PSScriptRoot\common\oephys_common.ps1"
+. "$PSScriptRoot\common\tasks_common.ps1"
 
 # Remove scheduled tasks
 Remove-ScheduledTask -taskName "Oephys New Chunk Task"

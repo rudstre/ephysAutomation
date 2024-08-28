@@ -1,6 +1,6 @@
 # Import common functions
-. "$PSScriptRoot\..\oephys_common.ps1"
-. "$PSScriptRoot\..\tasks_common.ps1"
+. "$PSScriptRoot\common\oephys_common.ps1"
+. "$PSScriptRoot\common\tasks_common.ps1"
 
 # Define paths
 $localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
