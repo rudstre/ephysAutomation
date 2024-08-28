@@ -1,33 +1,59 @@
 # Import common functions
 . "$PSScriptRoot\common\oephys_common.ps1"
+. "$PSScriptRoot\common\notifications_common.ps1"
 . "$PSScriptRoot\common\tasks_common.ps1"
 
 # Define paths
-$localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
 $scriptsPath = "$PSScriptRoot\OpenEphys"  # Source directory to copy files from
 $commonPath = "$PSScriptRoot\common"  # Source path for notifications directory
 $configPath = "$PSScriptRoot\configs"  # Source path for notifications directory
 
-# Check for the base save path in the Open Ephys config
-$baseSavePath = $oephysConfig.Config.BaseSavePath
 
-if (-not $baseSavePath) {
-    Write-Host "No base save path found in the configuration."
+# Function to get or create user info
+function Get-OrCreateUserInfo {
+    Write-Host "Enter your First Name:"
+    $firstName = Read-Host
+
+    Write-Host "Enter your Last Name:"
+    $lastName = Read-Host
+
+    # Check if user already exists in the configuration
+    $userInfo = $notificationsConfig.UserInfo | Where-Object { $_.FirstName -eq $firstName -and $_.LastName -eq $lastName }
+
+    if (-not $userInfo) {
+        Write-Host "No user information found for $firstName $lastName. Creating new user entry..."
+        $userInfo = @{
+            FirstName = $firstName
+            LastName  = $lastName
+            UserKey   = ""
+            Devices   = @()
+            BaseSavePath = ""
+        }
+        $notificationsConfig.UserInfo += $userInfo
+    } else {
+        Write-Host "Welcome back, $firstName $lastName! Your user information has been found."
+    }
+
+    return $userInfo
+}
+
+# Get or create the user info
+$userInfo = Get-OrCreateUserInfo
+
+# Check for the base save path in the user's configuration
+if (-not $userInfo.BaseSavePath) {
+    Write-Host "No base save path found in your configuration."
     Write-Host "Please specify a general base path on the Buffer storage where all Open Ephys data should be moved after recording."
     Write-Host "Note: This path should NOT be project-specific. You will choose a project-specific folder shortly."
-    $baseSavePath = Read-Host
-    $oephysConfig.Config.BaseSavePath = $baseSavePath
-    $oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
+    $userInfo.BaseSavePath = Read-Host
 } else {
-    Write-Host "Current base save path for moving data: $baseSavePath"
+    Write-Host "Current base save path for moving data: $($userInfo.BaseSavePath)"
     Write-Host "This path should be a general location for storing all Open Ephys data."
     Write-Host "Do you want to keep this base save path? (y/n)"
     $response = Read-Host
     if ($response -ne "y") {
         Write-Host "Please specify a new general base save path on the Buffer storage:"
-        $baseSavePath = Read-Host
-        $oephysConfig.Config.BaseSavePath = $baseSavePath
-        $oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
+        $userInfo.BaseSavePath = Read-Host
     }
 }
 
@@ -56,61 +82,31 @@ Copy-Item -Path "$scriptsPath\*" -Destination $localScriptPath -Recurse -Force
 Copy-Item -Path "$commonPath" -Destination $localScriptPath -Recurse -Force
 Copy-Item -Path "$configPath" -Destination $localScriptPath -Recurse -Force
 
-
 Write-Host "All necessary files and notifications directory copied to local storage for resilience against remote storage disconnection."
 
-# Initialize user info from notifications configuration
-$userInfo = $notificationsConfig.UserInfo
+# Save the updated notifications config to file
+$notificationsConfig | ConvertTo-Json | Set-Content -Path $notificationsConfigPath
 
-# Check if user info is already present
-if ($userInfo) {
-    Write-Host "Welcome back, $($userInfo.FirstName) $($userInfo.LastName)! Your Pushover User Key is already stored."
-    $userKey = $userInfo.UserKey
-    $previousDevices = $userInfo.Devices
-    Write-Host "Previously selected devices: $($previousDevices -join ', ')"
-} else {
-    # If no user info found, prompt for user details
-    Write-Host "Enter your First Name:"
-    $firstName = Read-Host
-
-    Write-Host "Enter your Last Name:"
-    $lastName = Read-Host
-
-    Write-Host "Enter your Pushover User Key:"
-    $userKey = Read-Host
-
-    # Fetch user's devices from Pushover API
-    Write-Host "Retrieving your devices from Pushover..."
-    $devices = Get-UserDevices
-
-    if ($devices.Count -gt 0) {
-        Write-Host "Your devices: $($devices -join ', ')"
-
-        # Prompt user to select devices for notifications or 'all' for all devices
-        Write-Host "Enter the devices you want to receive notifications on (comma-separated), or type 'all' for all devices:"
-        $selectedDevices = Read-Host
-
-        if ($selectedDevices -eq 'all') {
-            $selectedDevicesArray = @('all')
+# Prompt user to enter intervals for scheduled tasks
+function Get-IntervalInput {
+    param (
+        [string]$taskDescription
+    )
+    
+    do {
+        Write-Host "Enter the interval for $taskDescription (e.g., 60s for 60 seconds, 2m for 2 minutes):"
+        $input = Read-Host
+        
+        if ($input -match '^\d+[sm]$') {
+            if ($input -like '*s') {
+                return "PT$($input -replace 's','')S"
+            } elseif ($input -like '*m') {
+                return "PT$($input -replace 'm','')M"
+            }
         } else {
-            $selectedDevicesArray = $selectedDevices -split '\s*,\s*'
+            Write-Host "Invalid input. Please enter a valid interval."
         }
-
-        # Update user info in notifications JSON
-        $notificationsConfig.UserInfo = @{
-            FirstName = $firstName
-            LastName  = $lastName
-            UserKey   = $userKey
-            Devices   = $selectedDevicesArray
-        }
-
-        # Save updated notifications config to file
-        $notificationsConfig | ConvertTo-Json | Set-Content -Path $notificationsConfigPath
-        Write-Host "User information saved."
-    } else {
-        Write-Host "Failed to retrieve devices. Please check your Pushover User Key."
-        exit
-    }
+    } while ($true)
 }
 
 # Get intervals from user
