@@ -10,13 +10,10 @@ if ($currentMode -eq "RECORD") {
     Write-Host "Recording stopped."
 
     # Immediately start a new recording
-    Start-Sleep -Seconds 2
     Send-Command "RECORD"
     Write-Host "New recording started for continuity."
 } else {
     # If not recording, start acquisition and then start a new recording
-    Send-Command "ACQUIRE"
-    Start-Sleep -Seconds 2
     Send-Command "RECORD"
     Write-Host "Acquisition and recording started."
 }
