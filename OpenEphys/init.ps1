@@ -5,8 +5,8 @@
 # Define paths
 $localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
 $scriptsPath = "$PSScriptRoot\OpenEphys"  # Source directory to copy files from
-$commonPath = "$PSScriptRoot\..\common"  # Source path for notifications directory
-$configPath = "$PSScriptRoot\..\configs"  # Source path for notifications directory
+$commonPath = "$PSScriptRoot\common"  # Source path for notifications directory
+$configPath = "$PSScriptRoot\configs"  # Source path for notifications directory
 
 # Check for the base save path in the Open Ephys config
 $baseSavePath = $oephysConfig.Config.BaseSavePath
