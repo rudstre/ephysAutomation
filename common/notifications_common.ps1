@@ -1,5 +1,5 @@
 # Load configuration from notifications JSON
-$notificationsConfigPath = "$PSScriptRoot\..\notifications_config.json"
+$notificationsConfigPath = "$PSScriptRoot\..\configs\notifications_config.json"
 $notificationsConfig = Get-Content -Path $notificationsConfigPath | ConvertFrom-Json
 
 # Pushover API credentials from config
