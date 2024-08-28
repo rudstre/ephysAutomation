@@ -1,18 +1,8 @@
-# Load configuration from JSON
-$configPath = "$PSScriptRoot\oephys_config.json"
-$config = Get-Content -Path $configPath | ConvertFrom-Json
+# Import common functions
+. "$PSScriptRoot\oephys_common.ps1"
 
-# Define constants from the config file
-$hostAddress = $config.Config.Host
-$port = $config.Config.Port
-$destinationPath = "C:\Path\To\Destination"  # Path where you want to move recordings
-
-# Function to get the recording information from the API
-function Get-RecordingInfo {
-    $url = "http://$($hostAddress):$($port)/api/recording"
-    $response = Invoke-RestMethod -Uri $url -Method Get -ContentType "application/json"
-    return $response
-}
+# Define the destination path where recordings will be moved
+$destinationPath = "C:\Path\To\Destination"  # Update this path to your desired destination
 
 # Function to check if files are in use
 function Test-FilesInUse {

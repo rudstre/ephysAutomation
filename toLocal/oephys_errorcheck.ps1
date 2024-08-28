@@ -1,13 +1,9 @@
-# Load configuration from JSON
-$configPath = "$PSScriptRoot\oephys_config.json"
-$config = Get-Content -Path $configPath | ConvertFrom-Json
+# Import common functions
+. "$PSScriptRoot\oephys_common.ps1"
 
-# Define constants from the config file
-$hostAddress = $config.Config.Host
-$port = $config.Config.Port
-$remoteDrivePath = "\\RemoteStoragePath"  # Replace with the actual network path for Buffer
-$localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
+# Define the path for local and remote storage
 $localDriveLetter = "C:"  # Adjust this if the local storage is on a different drive
+$remoteDrivePath = "\\RemoteStoragePath"  # Replace with the actual network path for Buffer
 $shutdownScriptPath = "$PSScriptRoot\oephys_shutdown.ps1"  # Path to the shutdown script
 
 # Pushover API credentials from config
@@ -16,7 +12,10 @@ $apiToken = "your_api_token_here"
 $devices = $config.UserInfo.Devices -join ','
 
 # Function to send Pushover notification
-function Send-Notification($message) {
+function Send-Notification {
+    param (
+        [string]$message
+    )
     Invoke-RestMethod -Uri "https://api.pushover.net/1/messages.json" -Method Post -Body @{
         token = $apiToken
         user = $userKey
@@ -37,16 +36,10 @@ function Check-OpenEphysRunning {
 
 # Check if Open Ephys is still recording
 function Check-RecordingStatus {
-    $url = "http://$($hostAddress):$($port)/api/status"
-    try {
-        $response = Invoke-RestMethod -Uri $url -Method Get -ContentType "application/json"
-        if ($response.mode -ne "RECORD") {
-            Write-Host "Recording has stopped. Attempting to restart..."
-            Restart-Recording
-            return $false
-        }
-    } catch {
-        Send-Notification "Failed to check recording status. Open Ephys may not be responsive."
+    $currentMode = Get-CurrentMode
+    if ($currentMode -ne "RECORD") {
+        Write-Host "Recording has stopped. Attempting to restart..."
+        Restart-Recording
         return $false
     }
     return $true
@@ -54,20 +47,15 @@ function Check-RecordingStatus {
 
 # Restart recording if stopped
 function Restart-Recording {
-    try {
-        Invoke-RestMethod -Uri "http://$($hostAddress):$($port)/api/status" -Method Put -Body (@{mode = "ACQUIRE"} | ConvertTo-Json) -ContentType "application/json"
-        Start-Sleep -Seconds 2
-        Invoke-RestMethod -Uri "http://$($hostAddress):$($port)/api/status" -Method Put -Body (@{mode = "RECORD"} | ConvertTo-Json) -ContentType "application/json"
-        Start-Sleep -Seconds 2
+    Send-Command "ACQUIRE"
+    Start-Sleep -Seconds 2
+    Send-Command "RECORD"
+    Start-Sleep -Seconds 2
 
-        # Verify restart success
-        if (Check-RecordingStatus) {
-            Send-Notification "Recording had stopped but has been successfully restarted."
-        } else {
-            Send-Notification "Failed to restart recording after it stopped."
-        }
-    } catch {
-        Send-Notification "Error while attempting to restart recording: $_"
+    if (Get-CurrentMode -eq "RECORD") {
+        Send-Notification "Recording had stopped but has been successfully restarted."
+    } else {
+        Send-Notification "Failed to restart recording after it stopped."
     }
 }
 
@@ -99,17 +87,11 @@ function Check-StorageUsage {
 
 # Stop recording and run the shutdown script
 function Stop-RecordingAndShutdown {
-    try {
-        # Stop recording
-        Invoke-RestMethod -Uri "http://$($hostAddress):$($port)/api/status" -Method Put -Body (@{mode = "IDLE"} | ConvertTo-Json) -ContentType "application/json"
-        Write-Host "Recording stopped due to critical storage usage."
+    Send-Command "IDLE"
+    Write-Host "Recording stopped due to critical storage usage."
 
-        # Run shutdown script
-        & $shutdownScriptPath
-        Write-Host "Shutdown script executed."
-    } catch {
-        Send-Notification "Error during shutdown process: $_"
-    }
+    & $shutdownScriptPath
+    Write-Host "Shutdown script executed."
 }
 
 # Check if the remote storage drive is connected
@@ -152,7 +134,7 @@ function Check-RecordingBuildUp {
 # Main check functions
 if (Check-OpenEphysRunning) {
     if (-not Check-RecordingStatus) {
-        # Attempt restart already handled in Check-RecordingStatus
+        Write-Host "Attempted to restart recording."
     }
 }
 

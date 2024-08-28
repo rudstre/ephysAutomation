@@ -1,5 +1,5 @@
 # Load configuration from JSON
-$configPath = "$PSScriptRoot\oephys_config.json"
+$configPath = "$PSScriptRoot\toLocal\oephys_config.json"
 $config = Get-Content -Path $configPath | ConvertFrom-Json
 
 # Define constants from the config file
