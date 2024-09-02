@@ -1,8 +1,7 @@
-# Load configuration from Open Ephys JSON
-. "$PSScriptRoot\notifications_common.ps1"
-$localScriptPath = "$env:LOCALAPPDATA\OephysScripts"
+. "$env:OEPHYS_SCRIPT_PATH\common\notifications_common.ps1"
 
-$oephysConfigPath = "$PSScriptRoot\..\configs\oephys_config.json"
+# Load configuration from Open Ephys JSON
+$oephysConfigPath = "$env:OEPHYS_SCRIPT_PATH\configs\oephys_config.json"
 $oephysConfig = Get-Content -Path $oephysConfigPath | ConvertFrom-Json
 
 # Define constants from the Open Ephys config file

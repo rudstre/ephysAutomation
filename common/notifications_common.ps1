@@ -1,11 +1,18 @@
 # Load configuration from notifications JSON
-$notificationsConfigPath = "$PSScriptRoot\..\configs\notifications_config.json"
-$notificationsConfig = Get-Content -Path $notificationsConfigPath | ConvertFrom-Json
+$userConfigPath = "$env:OEPHYS_SCRIPT_PATH\configs\user_config.json"
+# Load the user config from the JSON file
+$userConfig = Get-Content -Path $userConfigPath | ConvertFrom-Json
+
+# Ensure 'UserInfo' property exists
+if (-not $userConfig.PSObject.Properties['UserInfo']) {
+    Add-Member -InputObject $userConfig -MemberType NoteProperty -Name 'UserInfo' -Value @()
+}
+$userInfo = $userConfig.UserInfo
 
 # Pushover API credentials from config
 $apiToken = "agsvfrtdcnc7iqqwhps89nrgmcya5a"
-$userKey = $notificationsConfig.UserInfo.UserKey
-$devices = $notificationsConfig.UserInfo.Devices -join ','
+$userKey = $userInfo.UserKey
+$devices = $userInfo.Devices -join ','
 
 # Function to send a Pushover notification
 function Send-Notification {
@@ -28,26 +35,38 @@ function Send-Notification {
     }
 }
 
-# Function to retrieve user's devices from Pushover API
-function Get-UserDevices {
-    try {
-        $response = Invoke-RestMethod -Uri "https://api.pushover.net/1/devices.json" -Method Post -Body @{
-            token = $apiToken
-            user = $userKey
-        }
+function Validate-UserKey {
+    param (
+        [string]$userKey
+    )
 
-        if ($response.devices) {
-            $userDevices = $response.devices | ForEach-Object { $_.name }
-            return $userDevices
-        } else {
-            Write-Host "No devices found for the user in Pushover."
-            return @()
-        }
-    } catch {
-        Write-Host "Error retrieving devices from Pushover: $_"
-        return @()
+    $apiToken = "agsvfrtdcnc7iqqwhps89nrgmcya5a"  # Pushover API token
+
+    # Make the POST request to validate the user key
+    $response = Invoke-RestMethod -Uri "https://api.pushover.net/1/users/validate.json" -Method Post -Body @{
+        user = $userKey
+        token = $apiToken
+    }
+
+    # Debugging: Print full response content
+    Write-Host "Debugging: Response Content:`n$response"
+
+    # Check if the response status is 1 (valid user)
+    if ($response.status -eq 1) {
+        # Extract devices
+        $devicesArray = $response.devices
+
+        # Convert the devices array to a comma-separated string
+        $devices = $devicesArray -join ', '
+
+        Write-Host "User key is valid. Active devices: $devices"
+        return $devices
+    } else {
+        Write-Host "Invalid user key or no active devices found."
+        return @()  # Return an empty array if no devices or invalid user
     }
 }
+
 
 # Function to validate if user has selected valid devices
 function Validate-SelectedDevices {
@@ -65,4 +84,17 @@ function Validate-SelectedDevices {
     }
 
     return $true
+}
+
+# Function to add a property to a PSObject if it doesn't exist
+function Ensure-PropertyExists {
+    param (
+        [psobject]$Object,
+        [string]$PropertyName,
+        [object]$DefaultValue
+    )
+
+    if (-not $Object.PSObject.Properties[$PropertyName]) {
+        $Object | Add-Member -MemberType NoteProperty -Name $PropertyName -Value $DefaultValue
+    }
 }

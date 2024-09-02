@@ -1,13 +1,43 @@
+# Initialize Open Ephys Environment Setup Script
+
+# Set initial environment variable for script path (before copying files)
+$env:OEPHYS_SCRIPT_PATH = "$PSScriptRoot"
+
 # Import common functions
-. "$PSScriptRoot\common\oephys_common.ps1"
-. "$PSScriptRoot\common\notifications_common.ps1"
-. "$PSScriptRoot\common\tasks_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\oephys_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\notifications_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\tasks_common.ps1"
 
 # Define paths
 $scriptsPath = "$PSScriptRoot\OpenEphys"  # Source directory to copy files from
-$commonPath = "$PSScriptRoot\common"  # Source path for notifications directory
-$configPath = "$PSScriptRoot\configs"  # Source path for notifications directory
+$commonPath = "$PSScriptRoot\common"      # Source path for common scripts
+$configPath = "$PSScriptRoot\configs"     # Source path for configs
+$localScriptPath = "C:\Users\$env:USERNAME\AppData\Local\OephysScripts"
 
+# Ensure local directory exists
+if (Test-Path -Path $localScriptPath) {
+    Write-Host "Local script path already exists: $localScriptPath"
+    Write-Host "Do you want to remove the existing directory and start fresh? (y/n)"
+    $response = Read-Host
+    if ($response -eq "y") {
+        Remove-Item -Path $localScriptPath -Recurse -Force
+        New-Item -ItemType Directory -Path $localScriptPath -Force
+    } else {
+        Write-Host "Exiting script setup."
+        exit
+    }
+} else {
+    New-Item -ItemType Directory -Path $localScriptPath -Force
+}
+
+# Load user configuration
+$userConfigPath = "$env:OEPHYS_SCRIPT_PATH\configs\user_config.json"
+$userConfig = Get-Content -Path $userConfigPath | ConvertFrom-Json
+
+# Ensure 'UserInfo' property exists
+if (-not $userConfig.PSObject.Properties['UserInfo']) {
+    Add-Member -InputObject $userConfig -MemberType NoteProperty -Name 'UserInfo' -Value @()
+}
 
 # Function to get or create user info
 function Get-OrCreateUserInfo {
@@ -18,18 +48,20 @@ function Get-OrCreateUserInfo {
     $lastName = Read-Host
 
     # Check if user already exists in the configuration
-    $userInfo = $notificationsConfig.UserInfo | Where-Object { $_.FirstName -eq $firstName -and $_.LastName -eq $lastName }
+    $userInfo = $userConfig.UserInfo | Where-Object { $_.FirstName -eq $firstName -and $_.LastName -eq $lastName }
 
     if (-not $userInfo) {
         Write-Host "No user information found for $firstName $lastName. Creating new user entry..."
-        $userInfo = @{
+        $userInfo = [PSCustomObject]@{
             FirstName = $firstName
             LastName  = $lastName
             UserKey   = ""
             Devices   = @()
             BaseSavePath = ""
+            SelectedDevices = @()
         }
-        $notificationsConfig.UserInfo += $userInfo
+        # Add new user to the UserInfo array
+        $userConfig.UserInfo += $userInfo
     } else {
         Write-Host "Welcome back, $firstName $lastName! Your user information has been found."
     }
@@ -40,74 +72,69 @@ function Get-OrCreateUserInfo {
 # Get or create the user info
 $userInfo = Get-OrCreateUserInfo
 
-# Check for the base save path in the user's configuration
-if (-not $userInfo.BaseSavePath) {
-    Write-Host "No base save path found in your configuration."
-    Write-Host "Please specify a general base path on the Buffer storage where all Open Ephys data should be moved after recording."
-    Write-Host "Note: This path should NOT be project-specific. You will choose a project-specific folder shortly."
-    $userInfo.BaseSavePath = Read-Host
-} else {
-    Write-Host "Current base save path for moving data: $($userInfo.BaseSavePath)"
-    Write-Host "This path should be a general location for storing all Open Ephys data."
-    Write-Host "Do you want to keep this base save path? (y/n)"
-    $response = Read-Host
-    if ($response -ne "y") {
-        Write-Host "Please specify a new general base save path on the Buffer storage:"
-        $userInfo.BaseSavePath = Read-Host
+# Check if the user has a Pushover UserKey
+if (-not $userInfo.UserKey) {
+    Write-Host "No Pushover user key found in your configuration."
+    Write-Host "Please obtain your Pushover user key by logging into your Pushover account."
+    Write-Host "Once obtained, enter your Pushover user key:"
+    $userInfo.UserKey = Read-Host
+}
+
+# Validate Pushover user key and retrieve devices
+$devices = Validate-UserKey -userKey $userInfo.UserKey
+
+# Store the complete device list in the global config
+$userInfo.Devices = $devices
+
+# Ensure 'SelectedDevices' property exists on the user info
+Ensure-PropertyExists -Object $userInfo -PropertyName 'SelectedDevices' -DefaultValue @()
+
+# If no selected devices, prompt user for selection
+if (-not $userInfo.SelectedDevices) {
+    Write-Host "No devices selected for notifications. Available devices: $($devices -join ', ')"
+    Write-Host "Please select devices to be notified ('all' for all devices):"
+    $selectedDevices = Read-Host
+    $userInfo.SelectedDevices = $selectedDevices -split ','
+
+    # Save the selected devices in global config
+    $userConfig | ConvertTo-Json | Set-Content -Path $userConfigPath
+}
+
+# Save selected devices to local config
+$localUserConfig = @{
+    UserInfo = @{
+        FirstName = $userInfo.FirstName
+        LastName = $userInfo.LastName
+        UserKey = $userInfo.UserKey
+        SelectedDevices = $userInfo.SelectedDevices
+        FullSavePath = ($userInfo.BaseSavePath + "\" + $projectFolder)
     }
 }
 
-# Ask for the project-specific folder name within the base save path
-Write-Host "Enter the project-specific folder name to organize the data within the base save path:"
-$projectFolder = Read-Host
-$oephysConfig.Config.ProjectFolder = $projectFolder
-$oephysConfig | ConvertTo-Json | Set-Content -Path $oephysConfigPath
-
-# Ensure local directory exists
-if (-not (Test-Path -Path $localScriptPath)) {
-    New-Item -ItemType Directory -Path $localScriptPath
-}
-
-# Run oephys_startup.ps1 to set up the recording environment
-Write-Host "Running startup script to initialize Open Ephys recording setup..."
-& "$PSScriptRoot\oephys_startup.ps1"
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Startup script failed. Please check the setup and try again."
-    exit
-}
+$localUserConfig | ConvertTo-Json | Set-Content -Path "$localScriptPath\user_config.json"
 
 # Copy files locally
-Copy-Item -Path "$scriptsPath\*" -Destination $localScriptPath -Recurse -Force
-Copy-Item -Path "$commonPath" -Destination $localScriptPath -Recurse -Force
-Copy-Item -Path "$configPath" -Destination $localScriptPath -Recurse -Force
+try {
+    # Ensure common and configs directories are created as directories
+    New-Item -Path "$localScriptPath\common" -ItemType Directory -Force
+    New-Item -Path "$localScriptPath\configs" -ItemType Directory -Force
+
+    Copy-Item -Path "$scriptsPath\*" -Destination "$localScriptPath" -Recurse -Force
+    Write-Host "Scripts copied successfully from $scriptsPath to $localScriptPath."
+
+    Copy-Item -Path "$commonPath\*" -Destination "$localScriptPath\common" -Recurse -Force
+    Write-Host "Common files copied successfully from $commonPath to $localScriptPath\common."
+
+    Copy-Item -Path "$configPath\*" -Destination "$localScriptPath\configs" -Recurse -Force
+    Write-Host "Config files copied successfully from $configPath to $localScriptPath\configs."
+} catch {
+    Write-Host "Error copying files: $_"
+}
+
+# Set environment variable to the new local path after copying
+$env:OEPHYS_SCRIPT_PATH = $localScriptPath
 
 Write-Host "All necessary files and notifications directory copied to local storage for resilience against remote storage disconnection."
-
-# Save the updated notifications config to file
-$notificationsConfig | ConvertTo-Json | Set-Content -Path $notificationsConfigPath
-
-# Prompt user to enter intervals for scheduled tasks
-function Get-IntervalInput {
-    param (
-        [string]$taskDescription
-    )
-    
-    do {
-        Write-Host "Enter the interval for $taskDescription (e.g., 60s for 60 seconds, 2m for 2 minutes):"
-        $input = Read-Host
-        
-        if ($input -match '^\d+[sm]$') {
-            if ($input -like '*s') {
-                return "PT$($input -replace 's','')S"
-            } elseif ($input -like '*m') {
-                return "PT$($input -replace 'm','')M"
-            }
-        } else {
-            Write-Host "Invalid input. Please enter a valid interval."
-        }
-    } while ($true)
-}
 
 # Get intervals from user
 $chunkInterval = Get-IntervalInput -taskDescription "starting/stopping recording (new chunk)"

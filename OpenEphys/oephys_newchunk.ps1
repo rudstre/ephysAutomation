@@ -1,5 +1,5 @@
 # Import common functions
-. "$PSScriptRoot\oephys_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\oephys_common.ps1"
 
 # Main script to handle starting and stopping recordings
 $currentMode = Get-CurrentMode

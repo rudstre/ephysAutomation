@@ -1,6 +1,6 @@
 # Import common functions
-. "$PSScriptRoot\..\oephys_common.ps1"
-. "$PSScriptRoot\..\notifications_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\oephys_common.ps1"
+. "$env:OEPHYS_SCRIPT_PATH\common\notifications_common.ps1"
 
 # Load configuration settings
 $recordingInfo = Get-RecordingInfo
